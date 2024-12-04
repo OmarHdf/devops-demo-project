@@ -1,77 +1,91 @@
 pipeline {
-  agent any
-  parameters {
-    string(name: 'build_version', defaultValue: 'V1.0', description: 'Build version to use for Docker image')
-  }
-  stages {
-    stage('Checkout') {
-      steps {
-        git branch: 'main', url: 'https://github.com/OmarHdf/devops-demo-project.git'
-      }
+    agent any
+
+    parameters {
+        string(name: 'build_version', defaultValue: 'V1.0', description: 'Build version to use for Docker image')
     }
-    stage('Build and Test') {
-      steps {
-        sh 'ls -ltr'
-        sh 'cd demo-java-app && mvn clean package'
-      }
-    }
-    stage('Static Code Analysis') {
-      environment {
+
+    environment {
         SONAR_URL = "http://sonarqube:9000"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-          sh 'cd demo-java-app && mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}'
-        }
-      }
-    }
-    stage('Docker Login Test') {
-      steps {
-        script {
-          sh 'echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin'
-        }
-      }
-    }
-    stage('Build and Push Docker Image') {
-      environment {
         DOCKER_IMAGE = "omarelhedfi/demo-java-app:${build_version}"
-      }
-      steps {
-        script {
-          sh '''
-            cd demo-java-app
-            docker build -t ${DOCKER_IMAGE} .
-          '''
-          def dockerImage = docker.image("${DOCKER_IMAGE}")
-          docker.withRegistry('https://index.docker.io/v1/', 'dockerhub') {
-            dockerImage.push()
-          }
-        }
-      }
-    }
-    stage('Update Deployment File') {
-      environment {
         GIT_REPO_NAME = "devops-demo-project"
         GIT_USER_NAME = "OmarHdf"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
-          script {
-            sh '''
-              git config user.email "omarhedfi99@gmail.com"
-              git config user.name "OmarHdf"
-              sed -i "s/tag: .*/tag: \"${build_version}\"/" helm/app/values.yaml || sed -i "s/tag:/tag: \"${build_version}\"/" helm/app/values.yaml
-              if ! git diff --quiet helm/app/values.yaml; then
-                git add helm/app/values.yaml
-                git commit -m "Update deployment image to version ${build_version}"
-                git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
-              else
-                echo "No changes detected in helm/app/values.yaml. Skipping commit."
-              fi
-            '''
-          }
-        }
-      }
     }
-  }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/OmarHdf/devops-demo-project.git'
+            }
+        }
+
+        stage('Build and Test') {
+            steps {
+                sh '''
+                    cd demo-java-app
+                    mvn clean package
+                '''
+            }
+        }
+
+        stage('Static Code Analysis') {
+            steps {
+                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
+                    sh '''
+                        cd demo-java-app
+                        mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Login Test') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    sh '''
+                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                script {
+                    sh '''
+                        cd demo-java-app
+                        docker build -t ${DOCKER_IMAGE} .
+                    '''
+                    def dockerImage = docker.image("${DOCKER_IMAGE}")
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub') {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('Update Deployment File') {
+            steps {
+                withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+                    sh '''
+                        git config user.email "omarhedfi99@gmail.com"
+                        git config user.name "OmarHdf"
+                        sed -i "s/tag: .*/tag: \"${build_version}\"/" helm/app/values.yaml
+                        git add helm/app/values.yaml
+                        git commit -m "Update deployment image to version ${build_version}" || echo "No changes to commit"
+                        git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline executed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check the logs for more details.'
+        }
+    }
 }
