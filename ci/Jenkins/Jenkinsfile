@@ -55,23 +55,32 @@
         }
       }
     }
-    stage('Update Deployment File') {
-      environment {
-        GIT_REPO_NAME = "devops-demo-project"
-        GIT_USER_NAME = "OmarHdf"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
-          sh '''
-            git config user.email "omarhedfi99@gmail.com"
-            git config user.name "OmarHdf"
-            sed -i "s/tag: .*/tag: \"${build_version}\"/" helm/app/values.yaml
+  stage('Update Deployment File') {
+  environment {
+    GIT_REPO_NAME = "devops-demo-project"
+    GIT_USER_NAME = "OmarHdf"
+  }
+  steps {
+    withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+      script {
+        sh '''
+          git config user.email "omarhedfi99@gmail.com"
+          git config user.name "OmarHdf"
+          
+          # Mise à jour de la valeur de "tag:"
+          sed -i "s/tag: .*/tag: \"${build_version}\"/" helm/app/values.yaml || sed -i "s/tag:/tag: \"${build_version}\"/" helm/app/values.yaml
+          
+          # Vérifiez si des modifications ont été faites
+          if ! git diff --quiet helm/app/values.yaml; then
             git add helm/app/values.yaml
             git commit -m "Update deployment image to version ${build_version}"
             git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
-          '''
-        }
+          else
+            echo "No changes detected in helm/app/values.yaml. Skipping commit."
+          fi
+        '''
       }
     }
   }
 }
+
